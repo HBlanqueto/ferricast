@@ -5,7 +5,7 @@ use ferricast_core::{
 };
 use openh264::{
     OpenH264API,
-    decoder::{DecodedYUV, Decoder, DecoderConfig as Oh264DecoderConfig},
+    decoder::{DecodedYUV, Decoder, DecoderConfig as Oh264DecoderConfig, Flush},
     formats::YUVSource,
 };
 
@@ -28,7 +28,11 @@ impl VideoDecoder for OpenH264Decoder {
             )));
         }
         let api = OpenH264API::from_source();
-        let cfg = Oh264DecoderConfig::new();
+        let cfg = Oh264DecoderConfig::new().flush_after_decode(if config.low_latency {
+            Flush::Flush
+        } else {
+            Flush::NoFlush
+        });
         let decoder = Decoder::with_api_config(api, cfg)
             .map_err(|e| FerricastError::Decode(format!("openh264 decoder init: {e:?}")))?;
         self.decoder = Some(decoder);

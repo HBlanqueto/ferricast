@@ -1493,6 +1493,7 @@ async fn run_receiver_session(
                                     width: v.width,
                                     height: v.height,
                                     pixel_format: PixelFormat::Bgra,
+                                    low_latency: true,
                                 })?;
                                 Some(d)
                             }

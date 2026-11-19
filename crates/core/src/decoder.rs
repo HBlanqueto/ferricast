@@ -24,6 +24,7 @@ pub struct DecoderConfig {
     /// when it can (VA-API can output NV12 directly, NVDEC similar);
     /// software decoders typically force NV12 / I420 regardless.
     pub pixel_format: PixelFormat,
+    pub low_latency: bool,
 }
 
 /// Decode an [`EncodedFrame`] stream to [`CapturedFrame`].
