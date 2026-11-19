@@ -302,9 +302,11 @@ fn parse_tables(stbl: &[u8]) -> Option<Tables> {
         words(body).take(count).map(u64::from).collect()
     } else {
         let (body, count) = counted(b"co64")?;
-        body.chunks_exact(8)
+        let (offsets, _) = body.as_chunks::<8>();
+        offsets
+            .iter()
             .take(count)
-            .map(|c| u64::from_be_bytes(c.try_into().unwrap_or_default()))
+            .map(|c| u64::from_be_bytes(*c))
             .collect()
     };
     Some(Tables {
@@ -323,29 +325,33 @@ fn parse_tables(stbl: &[u8]) -> Option<Tables> {
 }
 
 fn words(body: &[u8]) -> impl Iterator<Item = u32> + '_ {
-    body.chunks_exact(4)
-        .map(|c| u32::from_be_bytes(c.try_into().unwrap_or_default()))
+    let (words, _) = body.as_chunks::<4>();
+    words.iter().map(|c| u32::from_be_bytes(*c))
 }
 
 fn pairs(body: &[u8], count: usize) -> Vec<(u32, u32)> {
-    body.chunks_exact(8)
+    let (entries, _) = body.as_chunks::<8>();
+    entries
+        .iter()
         .take(count)
         .map(|c| {
             (
-                u32::from_be_bytes(c[..4].try_into().unwrap_or_default()),
-                u32::from_be_bytes(c[4..].try_into().unwrap_or_default()),
+                u32::from_be_bytes([c[0], c[1], c[2], c[3]]),
+                u32::from_be_bytes([c[4], c[5], c[6], c[7]]),
             )
         })
         .collect()
 }
 
 fn triples(body: &[u8], count: usize) -> Vec<(u32, u32)> {
-    body.chunks_exact(12)
+    let (entries, _) = body.as_chunks::<12>();
+    entries
+        .iter()
         .take(count)
         .map(|c| {
             (
-                u32::from_be_bytes(c[..4].try_into().unwrap_or_default()),
-                u32::from_be_bytes(c[4..8].try_into().unwrap_or_default()),
+                u32::from_be_bytes([c[0], c[1], c[2], c[3]]),
+                u32::from_be_bytes([c[4], c[5], c[6], c[7]]),
             )
         })
         .collect()

@@ -65,7 +65,8 @@ fn distance(a: &[u8], b: &[u8]) -> usize {
 fn assert_matches_reference(name: &str, tolerance: u8) {
     let frames = play(&mut Player::open(&fixture(name)).unwrap());
     let reference = std::fs::read(fixture(&format!("{name}.sig"))).unwrap();
-    let references: Vec<&[u8]> = reference.chunks_exact(SIGNATURE_LEN).collect();
+    let (chunks, _) = reference.as_chunks::<SIGNATURE_LEN>();
+    let references: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_slice()).collect();
     assert_eq!(frames.len(), references.len(), "{name}");
     for (i, frame) in frames.iter().enumerate() {
         let decoded = signature(frame);
