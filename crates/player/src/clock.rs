@@ -1,8 +1,6 @@
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-const RESYNC: Duration = Duration::from_secs(1);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Due {
     Show,
@@ -21,6 +19,7 @@ enum Plan {
 #[derive(Default)]
 struct State {
     anchor: Option<(Instant, u64)>,
+    last_shown: Option<Instant>,
     paused: bool,
     stopped: bool,
 }
@@ -67,9 +66,16 @@ impl Clock {
                 continue;
             }
             let now = Instant::now();
-            match plan(state.anchor, now, pts_us, self.max_lateness) {
+            match plan(
+                state.anchor,
+                state.last_shown,
+                now,
+                pts_us,
+                self.max_lateness,
+            ) {
                 Plan::Anchor => {
                     state.anchor = Some((now, pts_us));
+                    state.last_shown = Some(now);
                     return Due::Show;
                 }
                 Plan::Wait(wait) => {
@@ -79,7 +85,10 @@ impl Clock {
                         .unwrap_or_else(|e| e.into_inner())
                         .0;
                 }
-                Plan::Show => return Due::Show,
+                Plan::Show => {
+                    state.last_shown = Some(now);
+                    return Due::Show;
+                }
                 Plan::Late => return Due::Late,
             }
         }
@@ -90,7 +99,13 @@ impl Clock {
     }
 }
 
-fn plan(anchor: Option<(Instant, u64)>, now: Instant, pts_us: u64, max_lateness: Duration) -> Plan {
+fn plan(
+    anchor: Option<(Instant, u64)>,
+    last_shown: Option<Instant>,
+    now: Instant,
+    pts_us: u64,
+    max_lateness: Duration,
+) -> Plan {
     let Some((wall, base)) = anchor else {
         return Plan::Anchor;
     };
@@ -101,11 +116,11 @@ fn plan(anchor: Option<(Instant, u64)>, now: Instant, pts_us: u64, max_lateness:
     if due > now {
         return Plan::Wait(due - now);
     }
-    match now - due {
-        late if late > RESYNC => Plan::Anchor,
-        late if late > max_lateness => Plan::Late,
-        _ => Plan::Show,
+    if now - due <= max_lateness {
+        return Plan::Show;
     }
+    let starved = last_shown.is_none_or(|shown| now - shown >= max_lateness * 2);
+    if starved { Plan::Anchor } else { Plan::Late }
 }
 
 #[cfg(test)]
@@ -123,14 +138,14 @@ mod tests {
 
     #[test]
     fn the_first_frame_sets_the_timeline() {
-        assert_eq!(plan(None, Instant::now(), 5, LATENESS), Plan::Anchor);
+        assert_eq!(plan(None, None, Instant::now(), 5, LATENESS), Plan::Anchor);
     }
 
     #[test]
     fn a_frame_ahead_of_the_timeline_waits_for_its_turn() {
         let start = Instant::now();
         assert_eq!(
-            plan(anchored(start), start, 1_040_000, LATENESS),
+            plan(anchored(start), Some(start), start, 1_040_000, LATENESS),
             Plan::Wait(Duration::from_millis(40))
         );
     }
@@ -139,30 +154,100 @@ mod tests {
     fn a_frame_slightly_behind_is_still_shown() {
         let start = Instant::now();
         let now = start + Duration::from_millis(60);
-        assert_eq!(plan(anchored(start), now, 1_020_000, LATENESS), Plan::Show);
+        assert_eq!(
+            plan(anchored(start), Some(now), now, 1_020_000, LATENESS),
+            Plan::Show
+        );
     }
 
     #[test]
-    fn a_frame_too_far_behind_is_late() {
+    fn a_frame_too_far_behind_is_late_when_another_was_just_shown() {
         let start = Instant::now();
         let now = start + Duration::from_millis(200);
-        assert_eq!(plan(anchored(start), now, 1_020_000, LATENESS), Plan::Late);
+        let shown = now - Duration::from_millis(10);
+        assert_eq!(
+            plan(anchored(start), Some(shown), now, 1_020_000, LATENESS),
+            Plan::Late
+        );
     }
 
     #[test]
-    fn a_stall_longer_than_a_second_resynchronises() {
+    fn a_late_frame_is_shown_when_nothing_was_shown_lately() {
         let start = Instant::now();
-        let now = start + Duration::from_secs(3);
+        let now = start + Duration::from_millis(200);
         assert_eq!(
-            plan(anchored(start), now, 1_020_000, LATENESS),
+            plan(anchored(start), Some(start), now, 1_020_000, LATENESS),
             Plan::Anchor
         );
     }
 
     #[test]
+    fn a_long_stall_resynchronises() {
+        let start = Instant::now();
+        let now = start + Duration::from_secs(3);
+        assert_eq!(
+            plan(anchored(start), Some(start), now, 1_020_000, LATENESS),
+            Plan::Anchor
+        );
+    }
+
+    fn shown_times(arrival: Duration, frame: Duration, count: u32) -> Vec<Duration> {
+        let start = Instant::now();
+        let (mut anchor, mut last_shown, mut now) = (None, None, start);
+        let mut shown = Vec::new();
+        for index in 0..count {
+            now = now.max(start + arrival * index);
+            let pts = frame.as_micros() as u64 * u64::from(index);
+            loop {
+                match plan(anchor, last_shown, now, pts, LATENESS) {
+                    Plan::Anchor => {
+                        anchor = Some((now, pts));
+                        last_shown = Some(now);
+                        shown.push(now - start);
+                        break;
+                    }
+                    Plan::Wait(wait) => now += wait,
+                    Plan::Show => {
+                        last_shown = Some(now);
+                        shown.push(now - start);
+                        break;
+                    }
+                    Plan::Late => break,
+                }
+            }
+        }
+        shown
+    }
+
+    #[test]
+    fn a_decoder_slower_than_the_clip_keeps_showing_frames_without_long_freezes() {
+        let shown = shown_times(
+            Duration::from_millis(50),
+            Duration::from_micros(33_333),
+            120,
+        );
+        let longest_gap = shown.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+        assert!(
+            shown.len() >= 90,
+            "only {} of 120 frames shown",
+            shown.len()
+        );
+        assert!(longest_gap <= Duration::from_millis(150), "{longest_gap:?}");
+    }
+
+    #[test]
+    fn a_decoder_faster_than_the_clip_shows_every_frame_on_time() {
+        let shown = shown_times(Duration::from_millis(20), Duration::from_micros(33_333), 90);
+        assert_eq!(shown.len(), 90);
+    }
+
+    #[test]
     fn a_loop_restart_resynchronises() {
         let start = Instant::now();
-        assert_eq!(plan(anchored(start), start, 0, LATENESS), Plan::Anchor);
+        assert_eq!(
+            plan(anchored(start), Some(start), start, 0, LATENESS),
+            Plan::Anchor
+        );
     }
 
     #[test]
