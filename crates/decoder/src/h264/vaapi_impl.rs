@@ -307,6 +307,7 @@ impl Worker {
 }
 
 struct Active {
+    display: Rc<Display>,
     sps: Sps,
     ctx: Rc<Context>,
     surfaces: Vec<Rc<Surface<()>>>,
@@ -339,6 +340,7 @@ impl Active {
             "VA-API H.264 context ready"
         );
         Ok(Self {
+            display: Rc::clone(display),
             sps: sps.clone(),
             ctx,
             surfaces: surfaces.into_iter().map(Rc::new).collect(),
@@ -624,15 +626,28 @@ impl Active {
         let surface = &*self.surfaces[handle];
         surface.sync().map_err(|e| failed("vaSyncSurface", e))?;
         let (coded_width, coded_height) = self.sps.coded_size();
-        let image = Image::derive_from(surface, (coded_width, coded_height))
-            .map_err(|e| failed("vaDeriveImage", e))?;
+        let image = match Image::derive_from(surface, (coded_width, coded_height)) {
+            Ok(image) if image.image().format.fourcc == VA_FOURCC_NV12 => image,
+            _ => {
+                let format = self
+                    .display
+                    .query_image_formats()
+                    .map_err(|e| failed("vaQueryImageFormats", e))?
+                    .into_iter()
+                    .find(|format| format.fourcc == VA_FOURCC_NV12)
+                    .ok_or_else(|| {
+                        FerricastError::Decode("VA-API driver has no NV12 image format".into())
+                    })?;
+                Image::create_from(
+                    surface,
+                    format,
+                    (coded_width, coded_height),
+                    (coded_width, coded_height),
+                )
+                .map_err(|e| failed("vaGetImage", e))?
+            }
+        };
         let info = image.image();
-        if info.format.fourcc != VA_FOURCC_NV12 {
-            return Err(FerricastError::Decode(format!(
-                "VA-API surface is {:#x}, not NV12",
-                info.format.fourcc
-            )));
-        }
         let data: &[u8] = image.as_ref();
         let (y_offset, uv_offset) = (info.offsets[0] as usize, info.offsets[1] as usize);
         let (x, y, width, height) = self.sps.visible_rect();
