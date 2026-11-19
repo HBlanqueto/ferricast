@@ -8,9 +8,9 @@
 //! readback, the same way the VA-API encoder consumes
 //! `CapturedFrame::Gpu` on the sender side.
 
+use crate::codec::Codec;
 use crate::error::Result;
 use crate::frame::{AudioCodec, AudioFrame, CapturedFrame, EncodedFrame, PixelFormat};
-use crate::protocol::Codec;
 
 #[derive(Debug, Clone)]
 pub struct DecoderConfig {

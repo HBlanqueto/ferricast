@@ -41,7 +41,7 @@ nvdec-decode = ["dep:shiguredo_nvcodec"]
 nvdec-hevc-decode = ["nvdec-decode"]
 
 [dependencies]
-ferricast-core.workspace = true
+ferricast-core = { path = "../core", default-features = false }
 bytes.workspace = true
 tracing.workspace = true
 

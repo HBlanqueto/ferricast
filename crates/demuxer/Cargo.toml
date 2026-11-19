@@ -9,6 +9,6 @@ default = ["matroska"]
 matroska = ["dep:matroska-demuxer"]
 
 [dependencies]
-ferricast-core.workspace = true
+ferricast-core = { path = "../core", default-features = false }
 bytes.workspace = true
 matroska-demuxer = { version = "0.8", optional = true }
