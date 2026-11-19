@@ -1,0 +1,11 @@
+[package]
+name = "ferricast-player"
+version = "0.1.0"
+edition = "2024"
+description = "Local video file playback for ferricast"
+
+[dependencies]
+ferricast-core.workspace = true
+ferricast-demuxer.workspace = true
+ferricast-decoder = { workspace = true, features = ["openh264-decode"] }
+tracing.workspace = true
