@@ -6,10 +6,11 @@ mod pts;
 use std::collections::VecDeque;
 use std::path::Path;
 
-use ferricast_core::{CapturedFrame, Result};
+use ferricast_core::Result;
 use ferricast_demuxer::Demuxer;
 
 pub use clock::{Clock, Due};
+pub use ferricast_core::{CapturedFrame, PixelFormat, RawFrame};
 pub use ferricast_demuxer::{Color, VideoStream};
 pub use limiter::FrameLimiter;
 
