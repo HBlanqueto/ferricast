@@ -1,8 +1,12 @@
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
+use std::time::{Duration, Instant};
+
+use bytes::Bytes;
 
 use ferricast_core::{
     CapturedFrame, Codec, DecoderConfig, EncodedFrame, FerricastError, PixelFormat, RawFrame,
@@ -306,7 +310,15 @@ impl Worker {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Readback {
+    Unknown,
+    Derive,
+    Get,
+}
+
 struct Active {
+    readback: Cell<Readback>,
     display: Rc<Display>,
     sps: Sps,
     ctx: Rc<Context>,
@@ -340,6 +352,7 @@ impl Active {
             "VA-API H.264 context ready"
         );
         Ok(Self {
+            readback: Cell::new(Readback::Unknown),
             display: Rc::clone(display),
             sps: sps.clone(),
             ctx,
@@ -620,38 +633,49 @@ impl Active {
         )
     }
 
-    fn read(&self, handle: usize, timestamp_us: u64, as_nv12: bool) -> Result<CapturedFrame> {
+    fn get_image<'a>(&self, surface: &'a Surface<()>) -> Result<Image<'a>> {
         let failed =
             |what: &str, e: libva::VaError| FerricastError::Decode(format!("VA-API {what}: {e:?}"));
-        let surface = &*self.surfaces[handle];
-        surface.sync().map_err(|e| failed("vaSyncSurface", e))?;
         let (coded_width, coded_height) = self.sps.coded_size();
-        let image = match Image::derive_from(surface, (coded_width, coded_height)) {
-            Ok(image) if image.image().format.fourcc == VA_FOURCC_NV12 => image,
-            _ => {
-                let format = self
-                    .display
-                    .query_image_formats()
-                    .map_err(|e| failed("vaQueryImageFormats", e))?
-                    .into_iter()
-                    .find(|format| format.fourcc == VA_FOURCC_NV12)
-                    .ok_or_else(|| {
-                        FerricastError::Decode("VA-API driver has no NV12 image format".into())
-                    })?;
-                Image::create_from(
-                    surface,
-                    format,
-                    (coded_width, coded_height),
-                    (coded_width, coded_height),
-                )
-                .map_err(|e| failed("vaGetImage", e))?
-            }
+        let format = self
+            .display
+            .query_image_formats()
+            .map_err(|e| failed("vaQueryImageFormats", e))?
+            .into_iter()
+            .find(|format| format.fourcc == VA_FOURCC_NV12)
+            .ok_or_else(|| {
+                FerricastError::Decode("VA-API driver has no NV12 image format".into())
+            })?;
+        Image::create_from(
+            surface,
+            format,
+            (coded_width, coded_height),
+            (coded_width, coded_height),
+        )
+        .map_err(|e| failed("vaGetImage", e))
+    }
+
+    fn copy_out(&self, handle: usize, how: Readback) -> Result<(Bytes, usize)> {
+        let surface = &*self.surfaces[handle];
+        surface
+            .sync()
+            .map_err(|e| FerricastError::Decode(format!("VA-API vaSyncSurface: {e:?}")))?;
+        let (coded_width, coded_height) = self.sps.coded_size();
+        let derived = match how {
+            Readback::Get => None,
+            _ => Image::derive_from(surface, (coded_width, coded_height))
+                .ok()
+                .filter(|image| image.image().format.fourcc == VA_FOURCC_NV12),
+        };
+        let image = match derived {
+            Some(image) => image,
+            None => self.get_image(surface)?,
         };
         let info = image.image();
         let data: &[u8] = image.as_ref();
         let (y_offset, uv_offset) = (info.offsets[0] as usize, info.offsets[1] as usize);
         let (x, y, width, height) = self.sps.visible_rect();
-        let (data, stride) = nv12::crop(
+        nv12::crop(
             &Nv12Planes {
                 y: data.get(y_offset..).unwrap_or_default(),
                 y_pitch: info.pitches[0] as usize,
@@ -662,17 +686,56 @@ impl Active {
         )
         .ok_or_else(|| {
             FerricastError::Decode("VA-API: NV12 planes are shorter than the picture".into())
-        })?;
+        })
+    }
+
+    fn pick_readback(&self, handle: usize) -> Result<(Bytes, usize)> {
+        let mut best = [Duration::MAX; 2];
+        let mut copy = None;
+        for _ in 0..2 {
+            for (slot, how) in [Readback::Derive, Readback::Get].into_iter().enumerate() {
+                let start = Instant::now();
+                match self.copy_out(handle, how) {
+                    Ok(done) => {
+                        best[slot] = best[slot].min(start.elapsed());
+                        copy = Some(done);
+                    }
+                    Err(error) => tracing::debug!(%error, ?how, "VA-API readback failed"),
+                }
+            }
+        }
+        let chosen = if best[1] < best[0] {
+            Readback::Get
+        } else {
+            Readback::Derive
+        };
+        self.readback.set(chosen);
+        tracing::info!(
+            derive_ms = best[0].as_secs_f64() * 1000.0,
+            get_image_ms = best[1].as_secs_f64() * 1000.0,
+            ?chosen,
+            "VA-API readback chosen"
+        );
+        copy.ok_or_else(|| FerricastError::Decode("VA-API: no way to read a picture back".into()))
+    }
+
+    fn read(&self, handle: usize, timestamp_us: u64, as_nv12: bool) -> Result<CapturedFrame> {
+        let (data, stride) = match self.readback.get() {
+            Readback::Unknown => self.pick_readback(handle)?,
+            how => self.copy_out(handle, how)?,
+        };
+        let (_, _, width, height) = self.sps.visible_rect();
+        let (width, height) = (width as usize, height as usize);
         let (data, stride, format) = if as_nv12 {
             (data, stride, PixelFormat::Nv12)
         } else {
-            let bgra = nv12::to_bgra(&data, stride, width as usize, height as usize)
+            let bgra = nv12::to_bgra(&data, stride, width, height)
                 .ok_or_else(|| FerricastError::Decode("VA-API: NV12 to BGRA failed".into()))?;
-            (bgra.into(), width as usize * 4, PixelFormat::Bgra)
+            (bgra.into(), width * 4, PixelFormat::Bgra)
         };
         Ok(CapturedFrame::Cpu(RawFrame {
-            width,
-            height,
+            width: width as u32,
+            height: height as u32,
             stride: stride as u32,
             format,
             data,

@@ -26,13 +26,17 @@ impl Decoder {
         };
         if !software_only && !software_requested(codec) {
             match hardware(codec, &config) {
-                Some(Ok(decoder)) => return Ok(decoder),
+                Some(Ok(decoder)) => {
+                    tracing::info!(%codec, width, height, "decoding on the GPU through VA-API");
+                    return Ok(decoder);
+                }
                 Some(Err(error)) => {
                     tracing::info!(%error, %codec, "no hardware decoder; using software");
                 }
                 None => {}
             }
         }
+        tracing::info!(%codec, width, height, "decoding in software");
         match codec {
             Codec::H264 => configured(&config).map(Self::H264),
             Codec::H265 => configured(&config).map(Self::H265),
