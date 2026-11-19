@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "Local video file playback for ferricast"
 
+[features]
+default = ["vaapi"]
+vaapi = ["ferricast-decoder/vaapi-decode"]
+
 [dependencies]
 ferricast-core = { path = "../core", default-features = false }
 ferricast-demuxer.workspace = true

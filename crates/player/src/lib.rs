@@ -6,7 +6,7 @@ mod pts;
 use std::collections::VecDeque;
 use std::path::Path;
 
-use ferricast_core::Result;
+use ferricast_core::{FerricastError, Result};
 use ferricast_demuxer::Demuxer;
 
 pub use clock::{Clock, Due};
@@ -23,18 +23,20 @@ pub struct Player {
     pending: PtsQueue,
     ready: VecDeque<CapturedFrame>,
     drained: bool,
+    software_only: bool,
 }
 
 impl Player {
     pub fn open(path: &Path) -> Result<Self> {
         let demuxer = Demuxer::open(path)?;
-        let decoder = open_decoder(&demuxer)?;
+        let decoder = open_decoder(&demuxer, false)?;
         Ok(Self {
             demuxer,
             decoder,
             pending: PtsQueue::default(),
             ready: VecDeque::new(),
             drained: false,
+            software_only: false,
         })
     }
 
@@ -52,9 +54,14 @@ impl Player {
             }
             let Some(packet) = self.demuxer.next_frame()? else {
                 self.drained = true;
-                for frame in self.decoder.flush()? {
-                    let frame = self.stamped(frame);
-                    self.ready.push_back(frame);
+                match self.decoder.flush() {
+                    Ok(frames) => {
+                        for frame in frames {
+                            let frame = self.stamped(frame);
+                            self.ready.push_back(frame);
+                        }
+                    }
+                    Err(error) => self.recover(error)?,
                 }
                 continue;
             };
@@ -73,7 +80,7 @@ impl Player {
                     if reorders {
                         self.pending.remove(pts);
                     }
-                    return Err(error);
+                    self.recover(error)?;
                 }
             }
         }
@@ -81,11 +88,20 @@ impl Player {
 
     pub fn rewind(&mut self) -> Result<()> {
         self.demuxer.rewind()?;
-        self.decoder = open_decoder(&self.demuxer)?;
+        self.decoder = open_decoder(&self.demuxer, self.software_only)?;
         self.pending.clear();
         self.ready.clear();
         self.drained = false;
         Ok(())
+    }
+
+    fn recover(&mut self, error: FerricastError) -> Result<()> {
+        if !self.decoder.is_hardware() {
+            return Err(error);
+        }
+        tracing::warn!(%error, "hardware decoding failed; continuing in software");
+        self.software_only = true;
+        self.rewind()
     }
 
     fn stamped(&mut self, mut frame: CapturedFrame) -> CapturedFrame {
@@ -102,7 +118,7 @@ impl Player {
     }
 }
 
-fn open_decoder(demuxer: &Demuxer) -> Result<Decoder> {
+fn open_decoder(demuxer: &Demuxer, software_only: bool) -> Result<Decoder> {
     let stream = demuxer.video();
-    Decoder::open(stream.codec, stream.width, stream.height)
+    Decoder::open(stream.codec, stream.width, stream.height, software_only)
 }
