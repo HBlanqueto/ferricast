@@ -128,7 +128,8 @@ impl VideoDecoder for H264Decoder {
 
         #[cfg(feature = "openh264-decode")]
         {
-            if var.is_empty() || var == "openh264" || var == "vaapi" || var == "nvdec" {
+            if var.is_empty() || matches!(var.as_str(), "software" | "openh264" | "vaapi" | "nvdec")
+            {
                 info!("H.264 decoder backend: openh264 (software)");
                 let mut d = OpenH264Decoder::default();
                 d.configure(config)?;
