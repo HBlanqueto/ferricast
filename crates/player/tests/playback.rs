@@ -103,6 +103,13 @@ fn hevc_clips_decode_to_the_reference_frames_in_presentation_order() {
 }
 
 #[test]
+fn av1_clips_decode_to_the_reference_frames() {
+    for name in ["av1.mp4", "av1.webm"] {
+        assert_matches_reference(name, 0);
+    }
+}
+
+#[test]
 fn vp8_and_vp9_clips_decode_to_the_reference_frames() {
     for name in ["vp8.webm", "vp9.webm", "vp9.mp4"] {
         assert_matches_reference(name, 0);

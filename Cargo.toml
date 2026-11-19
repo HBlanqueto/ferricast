@@ -145,3 +145,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.fdk-aac]
 opt-level = 3
+[profile.dev.package.rav1d]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false

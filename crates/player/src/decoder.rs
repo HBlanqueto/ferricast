@@ -1,14 +1,14 @@
 use ferricast_core::{
-    CapturedFrame, Codec, DecoderConfig, EncodedFrame, FerricastError, PixelFormat, Result,
-    VideoDecoder,
+    CapturedFrame, Codec, DecoderConfig, EncodedFrame, PixelFormat, Result, VideoDecoder,
 };
-use ferricast_decoder::{H264Decoder, H265Decoder, Vp8Decoder, Vp9Decoder};
+use ferricast_decoder::{Av1Decoder, H264Decoder, H265Decoder, Vp8Decoder, Vp9Decoder};
 
 pub(crate) enum Decoder {
     H264(H264Decoder),
     H265(H265Decoder),
     Vp8(Box<Vp8Decoder>),
     Vp9(Box<Vp9Decoder>),
+    Av1(Av1Decoder),
 }
 
 impl Decoder {
@@ -25,9 +25,7 @@ impl Decoder {
             Codec::H265 => configured(&config).map(Self::H265),
             Codec::Vp8 => configured(&config).map(|d| Self::Vp8(Box::new(d))),
             Codec::Vp9 => configured(&config).map(|d| Self::Vp9(Box::new(d))),
-            other => Err(FerricastError::Decode(format!(
-                "no decoder for {other} in this build"
-            ))),
+            Codec::Av1 => configured(&config).map(Self::Av1),
         }
     }
 
@@ -41,6 +39,7 @@ impl Decoder {
             Decoder::H265(d) => d.decode(packet),
             Decoder::Vp8(d) => d.decode(packet),
             Decoder::Vp9(d) => d.decode(packet),
+            Decoder::Av1(d) => d.decode(packet),
         }
     }
 
@@ -50,6 +49,7 @@ impl Decoder {
             Decoder::H265(d) => d.flush(),
             Decoder::Vp8(d) => d.flush(),
             Decoder::Vp9(d) => d.flush(),
+            Decoder::Av1(d) => d.flush(),
         }
     }
 }
