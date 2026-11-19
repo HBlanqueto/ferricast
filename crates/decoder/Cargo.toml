@@ -67,3 +67,6 @@ h264-reader = { version = "0.7", optional = true }
 # from H.264 + HEVC bitstreams without a second NVIDIA library
 # dependency).
 shiguredo_nvcodec = { version = "2026.1.0", optional = true }
+
+[dev-dependencies]
+ferricast-demuxer = { path = "../demuxer" }

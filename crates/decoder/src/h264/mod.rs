@@ -6,9 +6,8 @@
 //!    compiled in and a CUDA-capable GPU is present at runtime.
 //! 2. **VA-API** — opt-in only. Engaged when
 //!    `FERRICAST_H264_DECODE_BACKEND=vaapi` is set in the environment.
-//!    The slice-submission path is incomplete (see `vaapi_impl.rs`);
-//!    leaving it out of the default chain prevents accidental
-//!    engagement of a half-validated decode path.
+//!    The decode path is complete but has not been run on every driver,
+//!    so it stays out of the default chain.
 //! 3. **openh264** — software CPU decode. Default fallback. Always
 //!    works when compiled in.
 
@@ -20,8 +19,12 @@ compile_error!(
      so it can't be the sole backend."
 );
 
+#[cfg(feature = "vaapi-decode")]
+mod dpb;
 #[cfg(feature = "openh264-decode")]
 mod openh264_impl;
+#[cfg(feature = "vaapi-decode")]
+mod slice;
 #[cfg(feature = "vaapi-decode")]
 mod vaapi_impl;
 

@@ -2080,6 +2080,7 @@ dependencies = [
  "bytes",
  "cros-libva",
  "ferricast-core",
+ "ferricast-demuxer",
  "h264-reader",
  "libc",
  "openh264",

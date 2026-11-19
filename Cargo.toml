@@ -26,7 +26,6 @@ ferricast-chromecast = { path = "crates/chromecast" }
 ferricast-encoder = { path = "crates/encoder", default-features = false }
 ferricast-decoder = { path = "crates/decoder", default-features = false }
 ferricast-demuxer = { path = "crates/demuxer" }
-ferricast-player = { path = "crates/player" }
 ferricast-m3u8 = { path = "crates/m3u8" }
 ferricast-muxer = { path = "crates/muxer" }
 ferricast-hls = { path = "crates/hls" }
