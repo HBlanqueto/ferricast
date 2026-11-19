@@ -21,6 +21,8 @@
 
 pub mod h264;
 
+mod nv12;
+
 #[cfg(any(feature = "nvdec-hevc-decode", feature = "vaapi-hevc-decode"))]
 pub mod h265;
 

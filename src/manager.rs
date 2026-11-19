@@ -1492,11 +1492,7 @@ async fn run_receiver_session(
                                     codec: v.codec,
                                     width: v.width,
                                     height: v.height,
-                                    // NV12 is what every GPU decoder
-                                    // emits natively (VA-API VPP, NVDEC
-                                    // surface format); CPU fallbacks
-                                    // can convert if needed.
-                                    pixel_format: PixelFormat::Nv12,
+                                    pixel_format: PixelFormat::Bgra,
                                 })?;
                                 Some(d)
                             }
