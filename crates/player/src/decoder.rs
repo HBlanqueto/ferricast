@@ -6,8 +6,8 @@ use ferricast_decoder::{H264Decoder, Vp8Decoder, Vp9Decoder};
 
 pub(crate) enum Decoder {
     H264(H264Decoder),
-    Vp8(Vp8Decoder),
-    Vp9(Vp9Decoder),
+    Vp8(Box<Vp8Decoder>),
+    Vp9(Box<Vp9Decoder>),
 }
 
 impl Decoder {
@@ -21,8 +21,8 @@ impl Decoder {
         };
         match codec {
             Codec::H264 => configured(&config).map(Self::H264),
-            Codec::Vp8 => configured(&config).map(Self::Vp8),
-            Codec::Vp9 => configured(&config).map(Self::Vp9),
+            Codec::Vp8 => configured(&config).map(|d| Self::Vp8(Box::new(d))),
+            Codec::Vp9 => configured(&config).map(|d| Self::Vp9(Box::new(d))),
             other => Err(FerricastError::Decode(format!(
                 "no decoder for {other} in this build"
             ))),
