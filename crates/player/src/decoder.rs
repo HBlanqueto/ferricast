@@ -2,10 +2,12 @@ use ferricast_core::{
     CapturedFrame, Codec, DecoderConfig, EncodedFrame, FerricastError, PixelFormat, Result,
     VideoDecoder,
 };
-use ferricast_decoder::H264Decoder;
+use ferricast_decoder::{H264Decoder, Vp8Decoder, Vp9Decoder};
 
 pub(crate) enum Decoder {
     H264(H264Decoder),
+    Vp8(Vp8Decoder),
+    Vp9(Vp9Decoder),
 }
 
 impl Decoder {
@@ -18,26 +20,38 @@ impl Decoder {
             low_latency: false,
         };
         match codec {
-            Codec::H264 => {
-                let mut decoder = H264Decoder::new();
-                decoder.configure(&config)?;
-                Ok(Self::H264(decoder))
-            }
+            Codec::H264 => configured(&config).map(Self::H264),
+            Codec::Vp8 => configured(&config).map(Self::Vp8),
+            Codec::Vp9 => configured(&config).map(Self::Vp9),
             other => Err(FerricastError::Decode(format!(
                 "no decoder for {other} in this build"
             ))),
         }
     }
 
+    pub(crate) fn reorders(&self) -> bool {
+        matches!(self, Decoder::H264(_))
+    }
+
     pub(crate) fn decode(&mut self, packet: EncodedFrame) -> Result<Option<CapturedFrame>> {
         match self {
             Decoder::H264(d) => d.decode(packet),
+            Decoder::Vp8(d) => d.decode(packet),
+            Decoder::Vp9(d) => d.decode(packet),
         }
     }
 
     pub(crate) fn flush(&mut self) -> Result<Vec<CapturedFrame>> {
         match self {
             Decoder::H264(d) => d.flush(),
+            Decoder::Vp8(d) => d.flush(),
+            Decoder::Vp9(d) => d.flush(),
         }
     }
+}
+
+fn configured<D: VideoDecoder + Default>(config: &DecoderConfig) -> Result<D> {
+    let mut decoder = D::default();
+    decoder.configure(config)?;
+    Ok(decoder)
 }

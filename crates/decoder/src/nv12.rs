@@ -49,9 +49,39 @@ pub(crate) fn from_i420(planes: &Planar) -> Option<(Bytes, usize)> {
     Some((Bytes::from(out), stride))
 }
 
+pub(crate) fn narrow_le_bytes(
+    plane: &[u8],
+    stride: usize,
+    width: usize,
+    height: usize,
+    depth: u32,
+) -> Option<Vec<u8>> {
+    let shift = depth.saturating_sub(8);
+    let mut out = Vec::with_capacity(width * height);
+    for row in 0..height {
+        let line = plane.get(row * stride..)?.get(..width * 2)?;
+        out.extend(
+            line.chunks_exact(2)
+                .map(|pair| (u16::from_le_bytes([pair[0], pair[1]]) >> shift) as u8),
+        );
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn little_endian_bytes_are_narrowed_like_samples() {
+        let plane = [0xFF, 0x03, 0x00, 0x02, 9, 9, 9, 9];
+        assert_eq!(narrow_le_bytes(&plane, 4, 2, 1, 10).unwrap(), [255, 128]);
+    }
+
+    #[test]
+    fn a_byte_plane_shorter_than_its_rows_is_rejected() {
+        assert!(narrow_le_bytes(&[1, 2, 3], 2, 2, 1, 10).is_none());
+    }
 
     #[test]
     fn chroma_planes_are_interleaved_after_the_luma_rows() {

@@ -8,7 +8,7 @@ const WIDTH: usize = 128;
 const HEIGHT: usize = 72;
 const SIGNATURE_LEN: usize = 216;
 // openh264 is not bit-exact on some B slices: https://github.com/cisco/openh264/issues/3269
-const TOLERANCE: u8 = 8;
+const B_SLICE_TOLERANCE: u8 = 8;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -62,32 +62,43 @@ fn distance(a: &[u8], b: &[u8]) -> usize {
         .sum()
 }
 
+fn assert_matches_reference(name: &str, tolerance: u8) {
+    let frames = play(&mut Player::open(&fixture(name)).unwrap());
+    let reference = std::fs::read(fixture(&format!("{name}.sig"))).unwrap();
+    let references: Vec<&[u8]> = reference.chunks_exact(SIGNATURE_LEN).collect();
+    assert_eq!(frames.len(), references.len(), "{name}");
+    for (i, frame) in frames.iter().enumerate() {
+        let decoded = signature(frame);
+        let nearest = (0..references.len())
+            .min_by_key(|&r| distance(&decoded, references[r]))
+            .unwrap();
+        assert_eq!(nearest, i, "{name}: frame {i} looks like frame {nearest}");
+        let worst = decoded
+            .iter()
+            .zip(references[i])
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(worst <= tolerance, "{name}: frame {i} is off by {worst}");
+        assert!(
+            frame.timestamp_us.abs_diff(i as u64 * FRAME_US) <= 1_000,
+            "{name}: frame {i} at {}",
+            frame.timestamp_us
+        );
+    }
+}
+
 #[test]
 fn h264_clips_decode_to_the_reference_frames_in_presentation_order() {
     for name in ["h264.mp4", "h264.mov", "h264.mkv"] {
-        let frames = play(&mut Player::open(&fixture(name)).unwrap());
-        let reference = std::fs::read(fixture(&format!("{name}.sig"))).unwrap();
-        let references: Vec<&[u8]> = reference.chunks_exact(SIGNATURE_LEN).collect();
-        assert_eq!(frames.len(), references.len(), "{name}");
-        for (i, frame) in frames.iter().enumerate() {
-            let decoded = signature(frame);
-            let nearest = (0..references.len())
-                .min_by_key(|&r| distance(&decoded, references[r]))
-                .unwrap();
-            assert_eq!(nearest, i, "{name}: frame {i} looks like frame {nearest}");
-            let worst = decoded
-                .iter()
-                .zip(references[i])
-                .map(|(a, b)| a.abs_diff(*b))
-                .max()
-                .unwrap();
-            assert!(worst <= TOLERANCE, "{name}: frame {i} is off by {worst}");
-            assert!(
-                frame.timestamp_us.abs_diff(i as u64 * FRAME_US) <= 1_000,
-                "{name}: frame {i} at {}",
-                frame.timestamp_us
-            );
-        }
+        assert_matches_reference(name, B_SLICE_TOLERANCE);
+    }
+}
+
+#[test]
+fn vp8_and_vp9_clips_decode_to_the_reference_frames() {
+    for name in ["vp8.webm", "vp9.webm", "vp9.mp4"] {
+        assert_matches_reference(name, 0);
     }
 }
 

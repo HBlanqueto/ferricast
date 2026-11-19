@@ -58,7 +58,10 @@ impl Player {
                 continue;
             };
             let pts = packet.timestamp_us;
-            self.pending.push(pts);
+            let reorders = self.decoder.reorders();
+            if reorders {
+                self.pending.push(pts);
+            }
             match self.decoder.decode(packet) {
                 Ok(Some(frame)) => {
                     let frame = self.stamped(frame);
@@ -66,7 +69,9 @@ impl Player {
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    self.pending.remove(pts);
+                    if reorders {
+                        self.pending.remove(pts);
+                    }
                     return Err(error);
                 }
             }
@@ -83,6 +88,9 @@ impl Player {
     }
 
     fn stamped(&mut self, mut frame: CapturedFrame) -> CapturedFrame {
+        if !self.decoder.reorders() {
+            return frame;
+        }
         if let Some(pts) = self.pending.pop_earliest() {
             match &mut frame {
                 CapturedFrame::Cpu(raw) => raw.timestamp_us = pts,

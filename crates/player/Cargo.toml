@@ -7,5 +7,5 @@ description = "Local video file playback for ferricast"
 [dependencies]
 ferricast-core.workspace = true
 ferricast-demuxer.workspace = true
-ferricast-decoder = { workspace = true, features = ["openh264-decode"] }
+ferricast-decoder = { workspace = true, features = ["openh264-decode", "vp8-decode", "vp9-decode"] }
 tracing.workspace = true
