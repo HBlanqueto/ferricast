@@ -96,6 +96,13 @@ fn h264_clips_decode_to_the_reference_frames_in_presentation_order() {
 }
 
 #[test]
+fn hevc_clips_decode_to_the_reference_frames_in_presentation_order() {
+    for name in ["hevc.mp4", "hevc.mkv"] {
+        assert_matches_reference(name, 0);
+    }
+}
+
+#[test]
 fn vp8_and_vp9_clips_decode_to_the_reference_frames() {
     for name in ["vp8.webm", "vp9.webm", "vp9.mp4"] {
         assert_matches_reference(name, 0);

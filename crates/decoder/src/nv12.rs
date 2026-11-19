@@ -49,6 +49,22 @@ pub(crate) fn from_i420(planes: &Planar) -> Option<(Bytes, usize)> {
     Some((Bytes::from(out), stride))
 }
 
+pub(crate) fn narrow_u16(
+    plane: &[u16],
+    stride: usize,
+    width: usize,
+    height: usize,
+    depth: u32,
+) -> Option<Vec<u8>> {
+    let shift = depth.saturating_sub(8);
+    let mut out = Vec::with_capacity(width * height);
+    for row in 0..height {
+        let line = plane.get(row * stride..)?.get(..width)?;
+        out.extend(line.iter().map(|&sample| (sample >> shift) as u8));
+    }
+    Some(out)
+}
+
 pub(crate) fn narrow_le_bytes(
     plane: &[u8],
     stride: usize,
@@ -71,6 +87,22 @@ pub(crate) fn narrow_le_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ten_bit_samples_keep_their_top_eight_bits() {
+        let plane = [0u16, 1023, 512, 4, 9, 9];
+        assert_eq!(narrow_u16(&plane, 3, 2, 2, 10).unwrap(), [0, 255, 1, 2]);
+    }
+
+    #[test]
+    fn eight_bit_samples_are_left_alone() {
+        assert_eq!(narrow_u16(&[7, 200], 2, 2, 1, 8).unwrap(), [7, 200]);
+    }
+
+    #[test]
+    fn a_sample_plane_shorter_than_its_rows_is_rejected() {
+        assert!(narrow_u16(&[1, 2, 3], 2, 2, 2, 8).is_none());
+    }
 
     #[test]
     fn little_endian_bytes_are_narrowed_like_samples() {

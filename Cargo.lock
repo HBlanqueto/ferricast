@@ -2056,6 +2056,7 @@ dependencies = [
  "ferricast-core",
  "h264-reader",
  "openh264",
+ "rust_h265",
  "rusty_vp9",
  "shiguredo_nvcodec",
  "symphonia",
@@ -5334,6 +5335,12 @@ dependencies = [
  "smallvec",
  "str_indices",
 ]
+
+[[package]]
+name = "rust_h265"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673f6ab280648836c8a4b2bdaf4877532b2715e3fdcf6e37a2f46ebed41c8cfd"
 
 [[package]]
 name = "rustc-hash"

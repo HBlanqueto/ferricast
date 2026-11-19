@@ -23,7 +23,11 @@ pub mod h264;
 
 mod nv12;
 
-#[cfg(any(feature = "nvdec-hevc-decode", feature = "vaapi-hevc-decode"))]
+#[cfg(any(
+    feature = "nvdec-hevc-decode",
+    feature = "vaapi-hevc-decode",
+    feature = "hevc-decode"
+))]
 pub mod h265;
 
 #[cfg(feature = "nvdec-decode")]
@@ -41,7 +45,11 @@ mod vp9;
 #[cfg(feature = "aac")]
 pub use aac::AacDecoder;
 pub use h264::H264Decoder;
-#[cfg(any(feature = "nvdec-hevc-decode", feature = "vaapi-hevc-decode"))]
+#[cfg(any(
+    feature = "nvdec-hevc-decode",
+    feature = "vaapi-hevc-decode",
+    feature = "hevc-decode"
+))]
 pub use h265::H265Decoder;
 #[cfg(feature = "vp8-decode")]
 pub use vp8::Vp8Decoder;
