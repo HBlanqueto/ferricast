@@ -8,6 +8,8 @@ use rust_h265::{Decoder, Frame, PixelData, parse_annex_b};
 
 use crate::nv12::{self, Planar};
 
+const MAX_THREADS: usize = 4;
+
 #[derive(Default)]
 pub struct SoftwareH265Decoder {
     decoder: Option<Decoder>,
@@ -24,7 +26,8 @@ impl VideoDecoder for SoftwareH265Decoder {
                 config.codec
             )));
         }
-        self.decoder = Some(Decoder::new().with_display_order());
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(MAX_THREADS));
+        self.decoder = Some(Decoder::new().with_display_order().with_threads(threads));
         self.ready.clear();
         Ok(())
     }
