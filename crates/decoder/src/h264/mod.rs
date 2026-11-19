@@ -40,7 +40,9 @@ pub use vaapi_impl::VaapiH264Decoder;
 
 const H264_BACKEND_VAR: &str = "FERRICAST_H264_DECODE_BACKEND";
 
+#[derive(Default)]
 pub enum H264Decoder {
+    #[default]
     Pending,
     #[cfg(feature = "nvdec-decode")]
     Nvdec(NvdecH264Decoder),
@@ -53,12 +55,6 @@ pub enum H264Decoder {
 impl H264Decoder {
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-impl Default for H264Decoder {
-    fn default() -> Self {
-        H264Decoder::Pending
     }
 }
 
