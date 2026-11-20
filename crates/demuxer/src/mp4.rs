@@ -8,6 +8,10 @@ use crate::nal::{Framing, LengthPrefixed};
 use crate::{Color, VideoStream, micros};
 
 const VISUAL_ENTRY_HEADER: usize = 78;
+// Upper bound on the samples taken from one track: about 19 hours at 30 fps.
+// Sample counts come straight from the file, so without a cap a few bytes of
+// `stsz` could ask for gigabytes of sample entries.
+const MAX_SAMPLES: usize = 1 << 21;
 
 pub struct Mp4Demuxer {
     file: File,
@@ -91,7 +95,11 @@ impl Mp4Demuxer {
         }
         let readable = samples
             .iter()
-            .take_while(|s| s.offset + u64::from(s.size) <= file_len)
+            .take_while(|s| {
+                s.offset
+                    .checked_add(u64::from(s.size))
+                    .is_some_and(|end| end <= file_len)
+            })
             .count();
         samples.truncate(readable);
         Ok(Self {
@@ -273,15 +281,17 @@ fn parse_elst(elst: &[u8]) -> Option<i64> {
     let version = *elst.first()?;
     let count = be32(elst, 4)? as usize;
     let entry_len = if version == 1 { 20 } else { 12 };
-    (0..count).find_map(|n| {
-        let entry = elst.get(8 + n * entry_len..)?;
-        let media_time = if version == 1 {
-            be64(entry, 8)? as i64
-        } else {
-            i64::from(be32(entry, 4)? as i32)
-        };
-        (media_time >= 0).then_some(media_time)
-    })
+    elst.get(8..)?
+        .chunks_exact(entry_len)
+        .take(count)
+        .find_map(|entry| {
+            let media_time = if version == 1 {
+                be64(entry, 8)? as i64
+            } else {
+                i64::from(be32(entry, 4)? as i32)
+            };
+            (media_time >= 0).then_some(media_time)
+        })
 }
 
 fn parse_tables(stbl: &[u8]) -> Option<Tables> {
@@ -292,7 +302,7 @@ fn parse_tables(stbl: &[u8]) -> Option<Tables> {
     let (stsc, stsc_count) = counted(b"stsc")?;
     let stsz = child(stbl, b"stsz")?;
     let constant_size = be32(stsz, 4)?;
-    let sample_count = be32(stsz, 8)? as usize;
+    let sample_count = (be32(stsz, 8)? as usize).min(MAX_SAMPLES);
     let sizes = if constant_size == 0 {
         words(stsz.get(12..)?).take(sample_count).collect()
     } else {
@@ -387,8 +397,8 @@ fn build_samples(tables: &Tables) -> Option<Vec<Sample>> {
                     .as_ref()
                     .is_none_or(|sync| sync.binary_search(&(samples.len() as u32 + 1)).is_ok()),
             });
-            offset += u64::from(size);
-            dts += u64::from(duration);
+            offset = offset.saturating_add(u64::from(size));
+            dts = dts.saturating_add(u64::from(duration));
         }
     }
     Some(samples)
@@ -517,6 +527,45 @@ mod tests {
             ..Tables::default()
         };
         assert_eq!(build_samples(&tables).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn declared_sample_count_is_capped() {
+        let counted = |count: u32| {
+            let mut body = vec![0; 4];
+            body.extend_from_slice(&count.to_be_bytes());
+            body
+        };
+        let mut stsz = vec![0; 4];
+        stsz.extend_from_slice(&1u32.to_be_bytes());
+        stsz.extend_from_slice(&u32::MAX.to_be_bytes());
+        let mut stbl = boxed(b"stts", &counted(0));
+        stbl.extend(boxed(b"stsc", &counted(0)));
+        stbl.extend(boxed(b"stsz", &stsz));
+        stbl.extend(boxed(b"stco", &counted(0)));
+        let tables = parse_tables(&stbl).unwrap();
+        assert_eq!(tables.sizes.len(), MAX_SAMPLES);
+    }
+
+    #[test]
+    fn sample_offsets_near_the_end_of_u64_do_not_overflow() {
+        let tables = Tables {
+            stts: vec![(2, u32::MAX)],
+            stsc: vec![(1, 2)],
+            sizes: vec![u32::MAX, u32::MAX],
+            chunk_offsets: vec![u64::MAX - 1],
+            ..Tables::default()
+        };
+        let samples = build_samples(&tables).unwrap();
+        assert_eq!(samples[1].offset, u64::MAX);
+    }
+
+    #[test]
+    fn edit_list_count_is_bounded_by_its_entries() {
+        let mut elst = vec![0, 0, 0, 0];
+        elst.extend_from_slice(&u32::MAX.to_be_bytes());
+        elst.extend_from_slice(&[0, 0, 0, 5, 0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 0, 0]);
+        assert_eq!(parse_elst(&elst), None);
     }
 
     #[test]
